@@ -13,6 +13,16 @@ In the previous stages, we updated the server to handle HTTP messages. Stage 14 
 
 Directory browsing is a feature in web servers that allows us to see the files and folders in a directory when a default index file (typically, index.html) is missing or not present in the directory. The web server dynamically generates an index.html file with a list of files and subdirectories within the request directory and serves it. To achieve directory browsing, we will use inbuilt functions like `opendir(),readdir(),closedir()` but remember that directory browsing can expose sensitive files and directories that were not intended to be publicly accessible. This can include configuration files, source code, database backups, and other sensitive data, so be careful when you configure the path to be displayed under directory browsing
 
+:::tip A Brief History of `index.html`
+
+The convention of naming a web page `index.html` dates back to the very early days of the World Wide Web in the early 1990s. When Tim Berners-Lee created the first web server (CERN httpd), servers needed a sensible default document to serve when a user requested a directory path (e.g., `http://example.com/`) rather than a specific file. The name `index` was chosen to mirror the concept of a book's index — a starting point and overview of what is available.
+
+NCSA HTTPd, one of the first widely adopted web servers (released in 1993), formalized this convention by defaulting to `index.html` as the directory index file. Apache HTTP Server inherited this behaviour, and it became the industry standard. Today, virtually every web server — Apache, Nginx, IIS, and our own eXpServer — defaults to looking for `index.html` (and variants like `index.htm`, `index.php`) when a directory is requested.
+
+Directory browsing, covered in this stage, is what happens when that default file is **absent**: instead of returning a 404, the server falls back to generating a live listing of the directory contents.
+
+:::
+
 ## Implementation
 
 Recall, during config lookup, when we were unable to find the index file, we set the `dir_path` to resource path.
@@ -28,7 +38,7 @@ To open a directory stream we use `opendir()` with `dir_path` and assigned to `D
 :::tip NOTE
 Before going to the implementation, we have to look into some system calls that will help you to implement directory browsing from **`<dirent.h>`**
 
-- [`opendir(dir_path)`](https://man7.org/linux/man-pages/man3/opendir.3.html) function opens a directory stream corresponding to the directory name, and returns a pointer to the directory stream. The stream is positioned at the first entry in the directory.on success, it will return a pointer to the a directory stream on error will return `NULL` pointer
+- [`opendir(dir_path)`](https://man7.org/linux/man-pages/man3/opendir.3.html) function opens a directory stream corresponding to the directory name, and returns a pointer to the directory stream. The stream is positioned at the first entry in the directory. On success, it will return a pointer to the a directory stream on error will return `NULL` pointer
 - [`readdir(dirp)`](https://man7.org/linux/man-pages/man3/readdir.3.html) function returns a pointer to a `dirent` structure representing the next directory entry in the directory stream pointed to by `dirp`. It returns `NULL` on reaching the end of the directory stream or if an error occurred.
   In the `glibc` implementation, the `dirent` structure is defined as follows:
 
@@ -78,14 +88,14 @@ xps_buffer_t *xps_directory_browsing(const char *dir_path, const char *pathname)
 
 #### `xps_directory.c`
 
-When the `xps_directory_browsing()` called from the `sesssion_process_request()` a buffer will be created with HTML tags and the heading of the page, then all the data will be added in the formatted pattern to the buffer
+When the `xps_directory_browsing()` called from the `sesssion_process_request()` a buffer will be created and populated with HTML tags and the heading of the page, then all the data (list of files in the directory) will be added in the formatted pattern to the buffer
 
 :::tip NOTE
 Before proceeding to `xps_session`, please go through some system calls and functions that will help us to implement directory browsing
 
-- [`stat`](https://man7.org/linux/man-pages/man3/stat.3type.html) file status - Describe the information about a file
-- [`fstat`](https://man7.org/linux/man-pages/man2/stat.2.html) retrieve the information about the file pointed to the pathname
-- [`S_ISREG, S_ISDIR`](https://www.gnu.org/software/libc/manual/html_node/Testing-File-Type.html) for testing the type of a file
+- [`stat`](https://man7.org/linux/man-pages/man3/stat.3type.html) file status - Describe the information about a file.
+- [`fstat`](https://man7.org/linux/man-pages/man2/stat.2.html) retrieve the information about the file pointed to the pathname.
+- [`S_ISREG, S_ISDIR`](https://www.gnu.org/software/libc/manual/html_node/Testing-File-Type.html) for checking the type of a file (regular file or directory).
   :::
 
 :::details expserver/src/disk/xps_directory.c
@@ -97,6 +107,7 @@ xps_buffer_t *xps_directory_browsing(const char *dir_path,const char *pathname){
   /* validate parameters */
 
   // Buffer for HTTP message
+  int buff_len = /* precalculated size of the html header + size of the directory data */
   char *buff= /* fill this */
   if (buff == NULL) {
     logger(LOG_ERROR, "xps_directory_browsing()", "malloc() failed for 'buff'");
@@ -128,7 +139,7 @@ xps_buffer_t *xps_directory_browsing(const char *dir_path,const char *pathname){
   struct dirent *dir_entry;
 
   while((dir_entry == readdir(dir)) != NULL){
-  //skip the first two entries such as . and .. in list directory from dir_entry->d_dname
+  //skip the first two entries which are . and .. in list directory from dir_entry->d_dname
     if (strcmp(dir_entry->d_name, ".") == || strcmp(dir_entry->d_name, "..") == 0))
         continue;
 
@@ -151,10 +162,12 @@ xps_buffer_t *xps_directory_browsing(const char *dir_path,const char *pathname){
         close(file_fd);
         continue;
     }
+
     //check if file is regular file or if the file is a direcory
     if(S_ISREG(file_stat.st_mode) || S_ISDIR(file_stat.st_mode)){
       char *is_dir = S_ISDIR(file_stat.st_mode) ? "/" : "";
 
+      // to remove the extra '/' when concatenating with the entry_name
       char *temp_pathname = str_create(pathname);
       if (temp_pathname[strlen(temp_pathname) - 1] == '/')
           temp_pathname[strlen(temp_pathname) - 1] = '\0';
@@ -199,7 +212,7 @@ xps_buffer_t *xps_directory_browsing(const char *dir_path,const char *pathname){
 
 ### `xps_config.c`
 
-In this part we have to set `lookup->dir_path = resource_path` if the index file not found , Remember that in the last stage, we iterate through the route index and set the `index_file_flound=true` if the `index_fille_path` is a file
+In this part we have to set `lookup->dir_path = resource_path` if the index file not found , Remember that in the last stage, we iterate through the route index and set the `index_file_found=true` if the `index_file_path` is a file
 
 ```c
 xps_config_lookup_t *xps_config_lookup(xps_config_t *config, xps_http_req_t *http_req, xps_connection_t *client, int *error) {
@@ -222,7 +235,7 @@ xps_config_lookup_t *xps_config_lookup(xps_config_t *config, xps_http_req_t *htt
 
 ### `xps_session.c`
 
-So far, when the lookup type is `REQ_FILE_SERVE`, we only handled file serving if the `file_path` in the `lookup` is not empty.Now onwards, we are going first to check if `dir_path` in the lookup is there; then it will go for directory browsing by creating an HTML file using the `xps_directory_browsing` function and add the HTML file in the HTTP response body
+So far, when the lookup type is `REQ_FILE_SERVE`, we only handled file serving if the `file_path` in the `lookup` is not empty. Now onwards, we are going first to check if `dir_path` in the lookup is there; then it will go for directory browsing by creating an HTML file using the `xps_directory_browsing` function and add the HTML file in the HTTP response body
 
 ```c
 void session_process_request(xps_session_t *session) {
@@ -231,12 +244,12 @@ void session_process_request(xps_session_t *session) {
 
   if(lookup->type == REQ_FILE_SERVE){
 
-    xps_buffer_t *dir_html= /*generate the html content*/
+    xps_buffer_t *dir_html= /* call `xps_directory_browsing()` to generate the html content */
     /*verify the dir_html is not NULL*/
 
     /*no change from the last stage*/
 
-    /*create http_res with status code HTTP_OK dir html is not NULL or HTTP_INTERNAL_SERVER_ERROR*/
+    /* call the function to create http_res with status code HTTP_OK dir html is not NULL or HTTP_INTERNAL_SERVER_ERROR*/
 
     /*if dir_html is not null set the body and header of http_res*/
 
@@ -253,6 +266,10 @@ void session_process_request(xps_session_t *session) {
 ## Milestone #1
 
 Build the server and run it with `xps_config.json`. Ensure that the `dir_path` is set to a directory without an index file (as configured in Stage 16's Experiment #2). Navigate to [localhost:8001](http://localhost:8001) in your browser. If the implementation is correct, you should see an HTML page listing all files and subdirectories in the configured directory.
+
+::: tip AUTOMATED TESTS
+Verify your implementation using the [Stage 17 Automated Tests](/tester/tests/stage16).
+:::
 
 ## Experiments
 
@@ -274,6 +291,6 @@ After completing this experiment, your directory listing should display the last
 
 In this stage, we implemented the `xps_directory` module to handle directory browsing. When a requested directory lacks an index file, the server now dynamically generates an HTML page listing all files and subdirectories, solving the 404 issue we encountered in Stage 16.
 
-This also marks the end of Phase 2. Throughout this phase, we transformed eXpServer from a basic TCP server into a fully functional HTTP server with dynamic configuration, multiple worker cores, file serving, reverse proxying, and URL redirection.
+This also marks the end of Phase 2. Throughout this phase, we transformed eXpServer from a basic TCP server into a fully functional HTTP server with dynamic configuration, file serving, reverse proxying, and URL redirection. At this point we have a functional web server. The subsequent stanges will add more advanced features such as adding security, data compression, load balancing etc to the server.
 
-However, our server currently accepts connections from any client on the network. What if you want to restrict access to only trusted IP addresses within your organization or block known malicious IPs? Think about how you might solve this problem.
+Our server currently accepts connections from any client on the network. What if you want to restrict access to only trusted IP addresses within your organization or block known malicious IPs? Think about how you might solve this problem.

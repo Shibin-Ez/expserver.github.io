@@ -263,6 +263,7 @@ export default defineConfig({
 						{ text: 'Stage 14: HTTP Request Module', link: '/tester/tests/stage14' },
 						{ text: 'Stage 15: HTTP Response Module', link: '/tester/tests/stage15' },
 						{ text: 'Stage 16: HTTP Config Module', link: '/tester/tests/stage16' },
+						{ text: 'Stage 17: Directory Browsing', link: '/tester/tests/stage17' },
 					],
 				},
 			],

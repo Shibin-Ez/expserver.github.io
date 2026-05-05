@@ -31,10 +31,10 @@ For example:
 ]
 ```
 
-- Listener configuration ensures that any client connecting to the server's IP address on port 8003 will be able to send requests.
-- `routes` defines the behavior of the server when handling specific request paths. Here, when a client sends a request to the root path (**`/`**), the server responds with a **`302`** status code, redirecting the client to the URL **`https://expserver.github.io`**.
+- The above listener configuration ensures that any client connecting to the server's IP address on port 8003 will be able to send requests.
+- `routes` defines the behavior of the server when handling specific request paths. In the above example, when a client sends a request to the root path (**`/`**), the server responds with a **`302`** status code, redirecting the client to the URL **`https://expserver.github.io`**.
 
-We are also introducing the redirecting server and re-introducing the reverse proxy functionality.
+We will introduce redirection functionality for the server in this stage. Moreover the reverse proxy functionality which was left out in the preceeding stages will be re-introduced.
 
 ## File Structure
 
@@ -42,7 +42,7 @@ We are also introducing the redirecting server and re-introducing the reverse pr
 
 ## Design
 
-A new module `xps_config` is added for reading the JSON configuration file and storing the parsed data in the structs. It also implements a lookup of the configuration to determine the appropriate server and route for an incoming request. It also matchs the listeners and hostnames.
+A new module `xps_config` is added for reading the JSON configuration file and storing the parsed data in the structs. It also implements a lookup of the configuration to determine the appropriate server and route for an incoming request. It also matches the listeners and hostnames.
 
 The session module is updated to incorporate the lookup of configuration while processing the request. The appropriate functionality is executed with respsect to the request type obtained from the lookup. The redirect server and reverse proxy server are implemented in this stage.
 
@@ -66,7 +66,6 @@ curl -O https://raw.githubusercontent.com/eXpServer/parson/master/parson.c
 ```
 
 This will create a parson directory inside `expserver/src/lib/` and download all the required source files.
-
 
 :::tip READ
 
@@ -131,7 +130,7 @@ This JSON configuration describes the setup of the eXpServer. `servers` is an ar
 
 ### xps_config
 
-A new folder, config, is added for creating a server with the configurations mentioned in the JSON file provided. It enables accessing a JSON-based server configuration for a web server application. It relies on the Parson library to parse JSON and provides a structured approach to create, query, and destroy configurations. `xps_config_create()` creates the server with the parsed information of the provided JSON configuration file. `xps_config_lookup()` determines the appropriate server and route for an incoming request.
+A new folder, config, is added for creating a server with the configurations mentioned in the JSON file provided. It enables accessing a JSON-based server configuration for a web server application. It relies on the Parson library to parse JSON and provides a structured approach to read the data in a configuration file into a memory data structure, access and manipulate the data, and free the memory after use. `xps_config_create()` creates the server with the parsed information of the provided JSON configuration file. `xps_config_lookup()` determines the appropriate server and route for an incoming request.
 
 ##### xps_config.h
 
@@ -212,11 +211,12 @@ void xps_config_lookup_destroy(xps_config_lookup_t *config_lookup, xps_core_t *c
 
 :::
 
-
 The names of the structs and its fields are intuitive, try to go through each and understand its use.
 
 #### `struct xps_config_s`
+
 This is the top-level structure that represents the entire server configuration parsed from the JSON file.
+
 - `config_path`: Path to the JSON configuration file.
 - `server_name`: Name of the eXpServer instance.
 - `servers`: A list of individual server configurations (`xps_config_server_t`).
@@ -224,13 +224,17 @@ This is the top-level structure that represents the entire server configuration 
 - `_config_json`: Pointer to the internal Parson JSON value.
 
 #### `struct xps_config_server_s`
+
 Encapsulates configuration for an individual server block.
+
 - `listeners`: A list of `xps_config_listener_t` defining host/port bindings.
 - `hostnames`: A list of virtual hostnames associated with this server.
 - `routes`: A list of `xps_config_route_t` defining request handling rules.
 
 #### `struct xps_config_route_s`
+
 Defines how a specific URL path should be handled.
+
 - `req_path`: The URL prefix used for route matching (e.g., `/api`).
 - `type`: The behavior type (`file_serve`, `redirect`, `reverse_proxy`, etc.).
 - `dir_path`: The root directory on disk for serving files.
@@ -240,7 +244,9 @@ Defines how a specific URL path should be handled.
 - `redirect_url`: Target destination for redirection.
 
 #### `struct xps_config_lookup_s`
+
 This structure represents the **result** of a configuration lookup for a specific request.
+
 - `type`: The resolved request type (e.g., `REQ_FILE_SERVE`, `REQ_REVERSE_PROXY`, etc.).
 - `file_path`: Absolute path to a specific file found on disk.
 - `dir_path`: Absolute path to a directory being accessed.
@@ -359,6 +365,11 @@ xps_config_lookup_t *xps_config_lookup(xps_config_t *config, xps_http_req_t *htt
       /* If request is for a directory, serve the index file (e.g. index.html)
        * instead of showing the directory listing. */
       bool index_file_found = false;
+      /*
+      - Iterate through the index list in the corresponding xps_config_route_t struct object
+      - Join the index file name with the resource_path to get the absolute path of the index file.
+      - This file will be then extracted and then send back to the client
+      */
       for (int i = 0; i < /*fill here*/; i++) {
         char *index_file = path_join(/*fill here*/);
        /*fill here*/
@@ -376,11 +387,30 @@ xps_config_lookup_t *xps_config_lookup(xps_config_t *config, xps_http_req_t *htt
 ```
 
 - For supporting functions you can refer to the [`xps_utils.c`](#xps-utils-c)
-- `xps_config_lookup_destroy` : Implement yourself
-- `parse_server` : Parses the server_object from the JSON configuration and populates the `xps_config_server_t` structure. Extracts and initializes server listeners, hostnames, and routes. For each listener, it calls `parse_listener`, and for each route, it calls `parse_route`. It then stores the parsed information into the server structure. Implement it.
-- `parse_route` : Parses the route configuration from the route_object in the JSON and fills the `xps_config_route_t` structure. Extracts the `req_path` and type of the route (the route type could be file_serve, reverse_proxy, or redirect). Based on the route type, it extracts additional information such as `dir_path` (for file serving), upstreams (for reverse proxy), and `redirect_url` (for redirects). It also manages the index files for file serving routes. Implement it.
-- `parse_listener` : Purpose: Parses listener configuration from the listener_object in the JSON and populates the `xps_config_listener_t` structure. Extracts the host and port values for the listener and validates them. Populates the listener structure with this data. Implement it.
-- `parse_all_listener` : The function iterates through all the servers and their listeners in the configuration. It checks whether each listener (identified by its host and port) already exists in the `_all_listeners` array. If the listener doesn't exist, it adds it to the \_all_listeners array. This ensures that all listeners are collected in `_all_listeners`, but duplicates (based on the same host and port) are avoided. Implement it.
+- `xps_config_lookup_destroy()` : Deallocate the memory that was allocated for xps_config_lookup_t struct object. Implement yourself.
+- `parse_server()` : Parses the server_object from the JSON configuration and populates the `xps_config_server_t` structure. Extracts and initializes server listeners, hostnames, and routes. For each listener, it calls `parse_listener`, and for each route, it calls `parse_route`. It then stores the parsed information into the server structure. Implement it.
+
+```c
+void parse_server(JSON_Object *server_object, xps_config_server_t *server);
+```
+
+- `parse_route()` : Parses the route configuration from the route_object in the JSON and fills the `xps_config_route_t` structure. Extracts the `req_path` and type of the route (the route type could be file_serve, reverse_proxy, or redirect). Based on the route type, it extracts additional information such as `dir_path` (for file serving), upstreams (for reverse proxy), and `redirect_url` (for redirects). It also parses and populates the `index` array field in `xps_config_route_s` struct with the index file names present in the config file. Implement it.
+
+```c
+void parse_route(JSON_Object *route_object, xps_config_route_t *route);
+```
+
+- `parse_listener()` : Purpose: Parses listener configuration from the listener_object in the JSON and populates the `xps_config_listener_t` structure. Extracts the host and port values for the listener and validates them. Populates the listener structure with this data. Implement it.
+
+```c
+void parse_listener(JSON_Object *listener_object, xps_config_listener_t *listener);
+```
+
+- `parse_all_listener()` : The function iterates through all the servers and their listeners in the configuration. It checks whether each listener (identified by its host and port) already exists in the `_all_listeners` array. If the listener doesn't exist, it adds it to the \_all_listeners array. This ensures that all listeners are collected in `_all_listeners`, but duplicates (based on the same host and port) are avoided. Implement it.
+
+```c
+void parse_all_listeners(vec_void_t *_all_listeners, xps_config_server_t *server);
+```
 
 ### Core Module - Modifications
 
@@ -436,6 +466,8 @@ if (lookup->type == REQ_FILE_SERVE) {
 
 Processes the command-line arguments to retrieve the configuration file path. The configuration object is created by invoking the method of `xps_config` module. Then `core_create` function is invoked which handles creation of listeners and attaching it with core in accordance with the `config` object. And then starts the core.
 
+We will be using a utility tool called `xps_cliargs` to accept the xps_config.json file path as command-line argument
+
 ```c
 int main(int argc, char *argv[]) {
   signal(SIGINT, sigint_handler); //for handling ctrl+c
@@ -466,6 +498,12 @@ void sigint_handler(int signum) {
 ### Additional utilities to be added
 
 - Cliargs : To handle and store command-line arguments related to the configuration file path.
+  To invoke `expSever` our command-line hereafter will be as follows:
+
+```bash
+./xps path/to/xps_config.json
+```
+
 :::details **expserver/src/utils/xps_cliargs.h**
 
 ```c
@@ -523,6 +561,7 @@ void xps_cliargs_destroy(xps_cliargs_t *cliargs) {
 :::
 
 - Utility functions required for checking directory, file, absolute path.
+
 :::details **expserver/src/utils/xps_utils.c** {#xps-utils-c}
 
 ```c
@@ -620,8 +659,6 @@ Three port would be created as given:
 
 - First, we would be verifying the file server functionality. An `index.html` file as mentioned in the `xps_config.json` is created in the public folder. Add some standard html code in this file. The contents can be viewed on [localhost:8001](http://localhost:8001) on the browser.
 
-Try by replacing files of different format. You have to update JSON configuration file accordingly.
-
 - Now, run a python file server as done earlier in Phase 0.
 
 ```bash
@@ -630,7 +667,7 @@ python3 -m http.server 3000
 
 This will create the upstream server mentioned in xps_config.json.
 
-The files in the directory in which the python server is running can be viewed from the urls [`localhost:8001/hello`](http://localhost:800/hello) and [`localhost:8002`](http://localhost:8002) . In this case, the url is redirected to the second one.
+The files in the directory in which the python server is running can be viewed from the urls [`localhost:8001/redirect`](http://localhost:800/redirect) and [`localhost:8002`](http://localhost:8002) . In this case, the url is redirected to the second one.
 
 - `localhost:8003` would be redirecting to the `redirect_url` mentioned in the JSON configuration file.
 
